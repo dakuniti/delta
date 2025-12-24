@@ -1,5 +1,5 @@
--- Fisch Santa Rod Request Exploit (Delta Fixed)
--- ZIndexBehavior エラーを修正
+-- Fisch Santa Rod Exploit (Anti-Kick Version)
+-- エラーコード267対策版
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -8,10 +8,10 @@ local LocalPlayer = Players.LocalPlayer
 -- 設定
 local CONFIG = {
     ROD_NAME = "Santa's Miracle Rod",
-    DEBUG = true,
+    DEBUG = false, -- falseに変更（ログを減らす）
+    USE_DELAY = true, -- 遅延を使って検知を回避
 }
 
--- 利用可能なロッド一覧
 local AVAILABLE_RODS = {
     "Smurf Rod", "Plastic Rod", "Test Rod",
     "Peppermint Rod", "Gingerbread Rod",
@@ -26,187 +26,155 @@ local function log(msg)
     end
 end
 
-local function warn_log(msg)
-    warn("[Santa] " .. msg)
-end
-
--- DataControllerバイパス
-local function bypassDataController()
-    log("DataControllerをバイパス中...")
-    
-    pcall(function()
-        local DataController = require(ReplicatedStorage.client.legacyControllers.DataController)
-        local oldFetch = DataController.fetch
+-- より安全なメタメソッドフック
+local function safeHook()
+    local success = pcall(function()
+        local mt = getrawmetatable(game)
+        setreadonly(mt, false)
         
-        DataController.fetch = function(key)
-            if key == "Fischmas2025" then
-                log("Fischmas2025データを偽装")
-                return {
-                    RodWished = "",
-                    hasWished = false
-                }
+        local old = mt.__namecall
+        
+        mt.__namecall = function(self, ...)
+            local args = {...}
+            local method = getnamecallmethod()
+            
+            -- 検知を避けるため、特定の条件でのみフック
+            if method == "InvokeServer" and tostring(self):find("santa") then
+                if tostring(self) == "santa_IsRodOwned" then
+                    return false
+                end
             end
-            return oldFetch(key)
+            
+            return old(self, ...)
         end
         
-        log("DataController バイパス成功")
+        setreadonly(mt, true)
     end)
+    
+    if success then
+        log("Hook success")
+    end
 end
 
--- メタメソッドフック
-local function hookRemoteEvents()
-    log("RemoteEventをフック中...")
+-- より自然なUI操作
+local function naturalClick(button, times)
+    times = times or 1
     
-    local mt = getrawmetatable(game)
-    local oldNamecall = mt.__namecall
-    local oldIndex = mt.__index
-    
-    setreadonly(mt, false)
-    
-    mt.__namecall = function(self, ...)
-        local args = {...}
-        local method = getnamecallmethod()
-        
-        if method == "InvokeServer" then
-            if self.Name == "santa_IsRodOwned" then
-                log("santa_IsRodOwned フック - false返却")
-                return false
-            end
-            
-            if self.Name == "santa_RequestRod" then
-                log("santa_RequestRod 呼び出し: " .. tostring(args[1]))
-            end
+    for i = 1, times do
+        if CONFIG.USE_DELAY then
+            wait(0.5 + math.random() * 0.3) -- ランダムな遅延
         end
         
-        return oldNamecall(self, ...)
-    end
-    
-    mt.__index = function(self, key)
-        local result = oldIndex(self, key)
+        -- 自然なクリックをシミュレート
+        pcall(function()
+            for _, conn in pairs(getconnections(button.Activated)) do
+                conn:Fire()
+            end
+        end)
         
-        if typeof(self) == "Instance" and self:IsA("GuiObject") then
-            if self.Name == "ChristmasLetter" and key == "Visible" then
-                return true
-            end
-            
-            if self.Name == "SignHere" and key == "Visible" then
-                return true
-            end
-            
-            if self.Name == "Date" and key == "Visible" then
-                return false
-            end
+        if CONFIG.USE_DELAY then
+            wait(0.2)
         end
-        
-        return result
     end
-    
-    setreadonly(mt, true)
-    log("フック完了")
 end
 
--- UI操作
+-- UI操作（検知されにくい方法）
 local function manipulateUI()
-    log("UI操作開始...")
+    log("UI manipulation start")
     
     wait(1)
     
-    local PlayerGui = LocalPlayer:WaitForChild("PlayerGui", 5)
-    if not PlayerGui then
-        warn_log("PlayerGui見つからず")
-        return false
-    end
+    local PlayerGui = LocalPlayer.PlayerGui
+    local christmas = PlayerGui:FindFirstChild("christmas")
     
-    local christmas = PlayerGui:WaitForChild("christmas", 5)
     if not christmas then
-        warn_log("christmas UI見つからず")
+        log("Christmas UI not found")
         return false
     end
     
-    -- SantasLetterボタンクリック
+    -- 手紙を開く
     local right = christmas:FindFirstChild("right")
     if right then
         local santasLetter = right:FindFirstChild("SantasLetter")
         if santasLetter then
-            log("SantasLetterボタン押下")
-            
-            for _, conn in pairs(getconnections(santasLetter.Activated)) do
-                conn:Fire()
-            end
-            
-            wait(1)
+            log("Opening letter")
+            naturalClick(santasLetter)
+            wait(1.5)
         end
     end
     
-    -- ChristmasLetter強制表示
+    -- メインUI
     local christmasLetter = christmas:FindFirstChild("ChristmasLetter")
-    if christmasLetter then
-        log("ChristmasLetter表示")
-        christmasLetter.Visible = true
-        
-        local safezone = christmasLetter:FindFirstChild("Safezone")
-        if safezone then
-            -- Date非表示
-            local dateLabel = safezone:FindFirstChild("Date")
-            if dateLabel then
-                dateLabel.Visible = false
-            end
-            
-            -- SignHere表示
-            local signHere = safezone:FindFirstChild("SignHere")
-            if signHere then
-                signHere.Visible = true
-            end
-            
-            -- TextBox入力
-            local textBox = safezone:FindFirstChild("TextBox")
-            if textBox then
-                log("テキスト入力: " .. CONFIG.ROD_NAME)
-                textBox.Text = CONFIG.ROD_NAME
-                
-                for _, conn in pairs(getconnections(textBox.FocusLost)) do
-                    conn:Fire()
-                end
-                
-                wait(0.5)
-                
-                -- SignHere 6回クリック
-                if signHere then
-                    log("SignHere 6回クリック開始...")
-                    
-                    for i = 1, 6 do
-                        wait(0.3)
-                        
-                        for _, conn in pairs(getconnections(signHere.Activated)) do
-                            conn:Fire()
-                        end
-                        
-                        log("クリック " .. i .. "/6")
-                    end
-                    
-                    log("UI操作完了!")
-                    return true
-                end
-            end
+    if not christmasLetter then
+        log("ChristmasLetter not found")
+        return false
+    end
+    
+    christmasLetter.Visible = true
+    
+    local safezone = christmasLetter:FindFirstChild("Safezone")
+    if not safezone then
+        log("Safezone not found")
+        return false
+    end
+    
+    -- UI要素の調整
+    local dateLabel = safezone:FindFirstChild("Date")
+    if dateLabel then
+        dateLabel.Visible = false
+    end
+    
+    local signHere = safezone:FindFirstChild("SignHere")
+    if signHere then
+        signHere.Visible = true
+    end
+    
+    -- テキスト入力
+    local textBox = safezone:FindFirstChild("TextBox")
+    if not textBox then
+        log("TextBox not found")
+        return false
+    end
+    
+    wait(0.5)
+    textBox.Text = CONFIG.ROD_NAME
+    
+    wait(0.5)
+    
+    -- FocusLostを自然に発火
+    pcall(function()
+        for _, conn in pairs(getconnections(textBox.FocusLost)) do
+            conn:Fire()
         end
+    end)
+    
+    wait(1)
+    
+    -- 確認ボタンを押す（自然な間隔で）
+    if signHere then
+        log("Clicking confirm button")
+        naturalClick(signHere, 6)
+        
+        log("UI manipulation complete")
+        return true
     end
     
     return false
 end
 
--- 直接リクエスト
+-- 直接リクエスト（最後の手段）
 local function directRequest()
-    log("直接リクエスト送信...")
+    log("Direct request")
+    
+    wait(1)
     
     local events = ReplicatedStorage:FindFirstChild("events")
     if not events then
-        warn_log("eventsフォルダ見つからず")
         return false
     end
     
     local santaRequestRod = events:FindFirstChild("santa_RequestRod")
     if not santaRequestRod then
-        warn_log("santa_RequestRod見つからず")
         return false
     end
     
@@ -215,10 +183,10 @@ local function directRequest()
     end)
     
     if success then
-        log("SUCCESS! 結果: " .. tostring(result))
+        log("Request success")
         return true
     else
-        warn_log("FAILED! エラー: " .. tostring(result))
+        log("Request failed")
         return false
     end
 end
@@ -226,20 +194,14 @@ end
 -- カメラリセット
 local function resetCamera()
     wait(1)
-    local camera = workspace.CurrentCamera
-    if camera then
-        camera.CameraType = Enum.CameraType.Custom
-        log("カメラリセット")
-    end
+    pcall(function()
+        workspace.CurrentCamera.CameraType = Enum.CameraType.Custom
+    end)
 end
 
 -- メイン実行
 local function main()
-    log("========================================")
-    log("  Fisch Santa Rod Exploit")
-    log("========================================")
-    log("ターゲット: " .. CONFIG.ROD_NAME)
-    log("")
+    log("Starting execution")
     
     -- ロッド検証
     local isValid = false
@@ -251,52 +213,38 @@ local function main()
     end
     
     if not isValid then
-        warn_log("無効なロッド名!")
-        warn_log("利用可能なロッド:")
-        for _, rod in ipairs(AVAILABLE_RODS) do
-            print("  - " .. rod)
-        end
+        warn("Invalid rod name: " .. CONFIG.ROD_NAME)
         return
     end
     
-    log("Step 1: フック設定")
-    hookRemoteEvents()
+    -- フックは最小限に
+    safeHook()
     
-    log("Step 2: DataControllerバイパス")
-    bypassDataController()
+    wait(1)
     
-    log("Step 3: UI操作")
-    local uiSuccess = manipulateUI()
+    -- UI操作
+    local success = manipulateUI()
     
-    if uiSuccess then
-        log("SUCCESS: UI操作完了")
+    if success then
+        log("Success")
         resetCamera()
     else
-        log("WARNING: UI失敗 - 直接リクエスト試行")
+        log("UI failed, trying direct")
         wait(1)
-        
-        if directRequest() then
-            log("SUCCESS: 直接リクエスト完了")
-        else
-            warn_log("ERROR: 全ての方法が失敗")
-        end
+        directRequest()
     end
     
-    log("")
-    log("========================================")
-    log("  実行完了")
-    log("========================================")
+    log("Complete")
 end
 
--- GUI作成（ZIndexBehavior削除）
+-- シンプルなGUI
 local function createGUI()
     local ScreenGui = Instance.new("ScreenGui")
-    ScreenGui.Name = "SantaExploitGUI"
+    ScreenGui.Name = "SantaGUI"
     ScreenGui.ResetOnSpawn = false
-    -- ZIndexBehaviorを削除（Deltaで非対応）
     
     pcall(function()
-        ScreenGui.Parent = game:GetService("CoreGui")
+        ScreenGui.Parent = game.CoreGui
     end)
     
     if not ScreenGui.Parent then
@@ -304,115 +252,97 @@ local function createGUI()
     end
     
     local Frame = Instance.new("Frame")
-    Frame.Size = UDim2.new(0, 350, 0, 250)
-    Frame.Position = UDim2.new(0.5, -175, 0.3, 0)
-    Frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
-    Frame.BorderSizePixel = 0
+    Frame.Size = UDim2.new(0, 300, 0, 200)
+    Frame.Position = UDim2.new(0.5, -150, 0.3, 0)
+    Frame.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+    Frame.BorderSizePixel = 1
+    Frame.BorderColor3 = Color3.fromRGB(100, 100, 100)
     Frame.Active = true
     Frame.Draggable = true
     Frame.Parent = ScreenGui
     
-    local UICorner = Instance.new("UICorner")
-    UICorner.CornerRadius = UDim.new(0, 12)
-    UICorner.Parent = Frame
-    
     local Title = Instance.new("TextLabel")
-    Title.Size = UDim2.new(1, 0, 0, 50)
-    Title.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
-    Title.Text = "Santa Rod Exploit"
+    Title.Size = UDim2.new(1, 0, 0, 35)
+    Title.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    Title.BorderSizePixel = 0
+    Title.Text = "Santa Rod"
     Title.TextColor3 = Color3.new(1, 1, 1)
-    Title.Font = Enum.Font.GothamBold
-    Title.TextSize = 20
+    Title.Font = Enum.Font.SourceSansBold
+    Title.TextSize = 16
     Title.Parent = Frame
     
-    local TitleCorner = Instance.new("UICorner")
-    TitleCorner.CornerRadius = UDim.new(0, 12)
-    TitleCorner.Parent = Title
-    
-    local RodLabel = Instance.new("TextLabel")
-    RodLabel.Size = UDim2.new(0.9, 0, 0, 25)
-    RodLabel.Position = UDim2.new(0.05, 0, 0, 60)
-    RodLabel.BackgroundTransparency = 1
-    RodLabel.Text = "Rod Name:"
-    RodLabel.TextColor3 = Color3.new(1, 1, 1)
-    RodLabel.Font = Enum.Font.Gotham
-    RodLabel.TextSize = 14
-    RodLabel.TextXAlignment = Enum.TextXAlignment.Left
-    RodLabel.Parent = Frame
+    local Label = Instance.new("TextLabel")
+    Label.Size = UDim2.new(0.9, 0, 0, 20)
+    Label.Position = UDim2.new(0.05, 0, 0, 45)
+    Label.BackgroundTransparency = 1
+    Label.Text = "Rod Name:"
+    Label.TextColor3 = Color3.new(1, 1, 1)
+    Label.Font = Enum.Font.SourceSans
+    Label.TextSize = 13
+    Label.TextXAlignment = Enum.TextXAlignment.Left
+    Label.Parent = Frame
     
     local TextBox = Instance.new("TextBox")
-    TextBox.Size = UDim2.new(0.9, 0, 0, 40)
-    TextBox.Position = UDim2.new(0.05, 0, 0, 90)
-    TextBox.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+    TextBox.Size = UDim2.new(0.9, 0, 0, 30)
+    TextBox.Position = UDim2.new(0.05, 0, 0, 70)
+    TextBox.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
+    TextBox.BorderSizePixel = 1
+    TextBox.BorderColor3 = Color3.fromRGB(80, 80, 80)
     TextBox.Text = CONFIG.ROD_NAME
     TextBox.TextColor3 = Color3.new(1, 1, 1)
-    TextBox.Font = Enum.Font.Gotham
-    TextBox.TextSize = 14
+    TextBox.Font = Enum.Font.SourceSans
+    TextBox.TextSize = 13
     TextBox.ClearTextOnFocus = false
     TextBox.Parent = Frame
     
-    local TextBoxCorner = Instance.new("UICorner")
-    TextBoxCorner.CornerRadius = UDim.new(0, 8)
-    TextBoxCorner.Parent = TextBox
+    local ExecButton = Instance.new("TextButton")
+    ExecButton.Size = UDim2.new(0.9, 0, 0, 35)
+    ExecButton.Position = UDim2.new(0.05, 0, 0, 110)
+    ExecButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+    ExecButton.BorderSizePixel = 0
+    ExecButton.Text = "Execute"
+    ExecButton.TextColor3 = Color3.new(1, 1, 1)
+    ExecButton.Font = Enum.Font.SourceSansBold
+    ExecButton.TextSize = 14
+    ExecButton.Parent = Frame
     
-    local ExecuteButton = Instance.new("TextButton")
-    ExecuteButton.Size = UDim2.new(0.9, 0, 0, 45)
-    ExecuteButton.Position = UDim2.new(0.05, 0, 0, 145)
-    ExecuteButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
-    ExecuteButton.Text = "Request Rod"
-    ExecuteButton.TextColor3 = Color3.new(1, 1, 1)
-    ExecuteButton.Font = Enum.Font.GothamBold
-    ExecuteButton.TextSize = 18
-    ExecuteButton.Parent = Frame
-    
-    local ExecuteCorner = Instance.new("UICorner")
-    ExecuteCorner.CornerRadius = UDim.new(0, 8)
-    ExecuteCorner.Parent = ExecuteButton
-    
-    ExecuteButton.MouseButton1Click:Connect(function()
+    ExecButton.MouseButton1Click:Connect(function()
         CONFIG.ROD_NAME = TextBox.Text
-        ExecuteButton.Text = "Executing..."
-        ExecuteButton.BackgroundColor3 = Color3.fromRGB(200, 150, 50)
+        ExecButton.Text = "Running..."
+        ExecButton.BackgroundColor3 = Color3.fromRGB(150, 150, 50)
         
         spawn(function()
             main()
         end)
         
+        wait(3)
+        ExecButton.Text = "Done"
+        ExecButton.BackgroundColor3 = Color3.fromRGB(50, 100, 150)
         wait(2)
-        ExecuteButton.Text = "Done!"
-        ExecuteButton.BackgroundColor3 = Color3.fromRGB(50, 150, 200)
-        
-        wait(2)
-        ExecuteButton.Text = "Request Rod"
-        ExecuteButton.BackgroundColor3 = Color3.fromRGB(50, 200, 50)
+        ExecButton.Text = "Execute"
+        ExecButton.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
     end)
     
     local CloseButton = Instance.new("TextButton")
-    CloseButton.Size = UDim2.new(0.9, 0, 0, 35)
-    CloseButton.Position = UDim2.new(0.05, 0, 0, 200)
-    CloseButton.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+    CloseButton.Size = UDim2.new(0.9, 0, 0, 30)
+    CloseButton.Position = UDim2.new(0.05, 0, 0, 155)
+    CloseButton.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+    CloseButton.BorderSizePixel = 0
     CloseButton.Text = "Close"
     CloseButton.TextColor3 = Color3.new(1, 1, 1)
-    CloseButton.Font = Enum.Font.Gotham
-    CloseButton.TextSize = 14
+    CloseButton.Font = Enum.Font.SourceSans
+    CloseButton.TextSize = 13
     CloseButton.Parent = Frame
-    
-    local CloseCorner = Instance.new("UICorner")
-    CloseCorner.CornerRadius = UDim.new(0, 8)
-    CloseCorner.Parent = CloseButton
     
     CloseButton.MouseButton1Click:Connect(function()
         ScreenGui:Destroy()
     end)
-    
-    log("GUI作成完了")
 end
 
--- スクリプト起動
-log("スクリプト読み込み完了")
-log("GUIを起動中...")
+-- 起動
+wait(0.5)
 createGUI()
 
--- オートスタート（コメント解除で有効化）
+-- 自動実行（コメント解除で有効化）
 -- wait(3)
 -- main()
